@@ -1,103 +1,116 @@
-Grease Pencil Tool
+# Grease Pencil Tool
 
-Herramientas para llevar el Line Art de Blender a Moho como vectores reales y editables, y para trabajar con ellos dentro de Moho.
+**Lleva el Line Art de Blender a Moho como vectores reales que puedes editar.**
 
-El proyecto tiene dos piezas que se prueban por separado:
+¿Animas en 2D usando modelos 3D? Entonces conoces el problema: el liner que sale de Blender es una imagen, y en Moho ya no puedes cambiarle el pincel, el grosor ni el color. Con este proyecto, el liner llega a Moho como **trazos vectoriales de verdad**, y desde ahí lo controlas todo a tu gusto.
 
-Pieza	Archivo	Dónde corre
-Add-on de Blender	lineart_to_moho.py	Blender 3.6
-Script de Moho	grease_pencil_tool.lua (+ iconos .png)	Moho Pro 14.4
-¿Para qué sirve?
+Está hecho de dos piezas pequeñas que se instalan por separado:
 
-Si animas en 2D con modelos 3D, el Line Art de Blender detecta contornos y detalles internos (manos, pliegues, etc.) a partir de la cámara. Este proyecto pasa esos trazos a Moho para que el liner sea vectorial y lo controles allí: pincel, grosor, color, máscara y postproducción.
+| Pieza | Archivo | Dónde se usa |
+|---|---|---|
+| Add-on de Blender | `lineart_to_moho.py` | Blender 3.6 |
+| Script de Moho | `grease_pencil_tool.lua` (con sus iconos) | Moho Pro 14.4 |
 
-Flujo de trabajo:
+## ¿Qué puedes hacer con esto?
 
-En Blender, renderiza tu personaje sin liner como secuencia de imágenes.
-En Blender, hornea el Line Art a trazos de Grease Pencil y expórtalos a un archivo .lineart con el add-on.
-En Moho, importa tu secuencia de imágenes y usa Grease Pencil Tool para crear el liner vectorial desde ese archivo.
-Requisitos
-Blender 3.6 (usa la API de Grease Pencil de esa versión; no es compatible con la API nueva de Blender 4.3+).
-Moho Pro 14.4 o superior (usa RenderLayerImage, disponible desde 14.4).
-No hace falta instalar nada más: el script de Moho es Lua puro.
-Instalación
-Add-on de Blender
-En Blender: Edit > Preferences > Add-ons > Install... y elige lineart_to_moho.py.
-Activa el add-on Line Art to Moho.
-En la vista 3D, abre la barra lateral (tecla N) y busca la pestaña Moho.
-Script de Moho
-Copia grease_pencil_tool.lua y los iconos (grease_pencil_tool.png, grease_pencil_tool@2x.png) a la carpeta de scripts de Moho, juntos y con el mismo nombre base.
-Recarga los scripts o reinicia Moho.
-Uso
-1. Exportar desde Blender
+Al ejecutar **Grease Pencil Tool** en Moho eliges entre tres herramientas:
 
-En la pestaña Moho de la barra lateral, con el objeto Grease Pencil activo:
+- **Importar Line Art de Blender:** trae a Moho el liner que exportaste desde Blender, un dibujo vectorial por fotograma, dentro de una capa Switch. Incluye los detalles internos (manos, pliegues...), no solo el contorno.
+- **Auto Lineart:** crea un contorno vectorial alrededor de cualquier capa de Moho (imagen, vector, grupo...). Funciona incluso con objetos que se mueven o se deforman.
+- **Propagar estilo:** cambias el pincel, el grosor o el color de **un** fotograma y ese cambio se copia a todos los demás. Se acabó retocar fotograma por fotograma.
 
-Hornear Line Art: ejecuta el bake del modificador Line Art (el mismo botón del modificador).
-Elige el rango de fotogramas:
-Usar el rango de la escena, o
-Inicio y Fin a mano (puede ser un solo fotograma).
-Opciones:
-Solo fotogramas horneados: omite los fotogramas sin clave horneada en vez de repetir el último dibujo.
-Incluir capas ocultas.
-Exportar a Moho: elige dónde guardar el archivo .lineart.
+## Cómo funciona, en tres pasos
 
-Cada punto se convierte a coordenadas de la cámara de la escena (normalizadas de 0 a 1), así que la secuencia de imágenes y el liner deben salir de la misma cámara, la misma resolución y el mismo rango de fotogramas.
+1. **En Blender**, renderiza tu personaje **sin liner**, como secuencia de imágenes.
+2. **En Blender**, con el add-on, hornea el Line Art y expórtalo a un archivo `.lineart`.
+3. **En Moho**, importa tu secuencia de imágenes y abre **Grease Pencil Tool** para traer el liner vectorial.
 
-2. Trabajar en Moho
+> Importante: la secuencia de imágenes y el liner deben salir de la **misma cámara, con la misma resolución y el mismo rango de fotogramas**. Así cuadran perfecto sin tener que moverlos.
 
-Ejecuta Grease Pencil Tool. Aparece un panel con tres botones. Pulsa el de la herramienta que quieras (se marca su casilla) y luego OK; se abre el panel propio de esa herramienta.
+## Qué necesitas
 
-Auto Lineart
+- Blender **3.6**.
+- Moho Pro **14.4** o más nuevo.
 
-Genera un contorno vectorial editable alrededor de la silueta de la capa seleccionada (imagen, vector, grupo, Switch...). Renderiza la capa y traza su borde, así que solo saca el contorno exterior, no los detalles internos.
+No tienes que instalar nada más.
 
-Un fotograma: crea una capa vectorial.
-Un rango: crea una capa Switch con un dibujo vectorial por fotograma.
-Opciones: fotograma inicial y final, suavizado, simplificación de puntos, longitud mínima de contorno y grosor.
-El pincel, el color y el grosor se toman de la ventana Style de Moho.
-Importar Line Art de Blender
+## Instalación
 
-Lee el archivo .lineart y crea una capa Switch con un dibujo vectorial por fotograma (o una capa vectorial simple si el archivo tiene un solo fotograma). Al pulsar su botón se abre el selector de archivos.
+### El add-on de Blender
 
-Opciones: importar solo los primeros N fotogramas, desfase de fotogramas, suavizado, simplificación de puntos, grosor, límite de trazos por fotograma (útil para probar).
-Opcionales: usar la presión de Blender como grosor por punto (experimental), dibujar un marco de alineación para comprobar la escala, cerrar los trazos abiertos como lazos de ida y vuelta (normalmente no).
-El pincel, el color y el grosor se copian de la ventana Style.
-La escala es fija: el encuadre del proyecto se toma como 2 unidades de alto, sin depender de la cámara ni del zoom de la vista de Moho, así que el liner debe caer sobre una secuencia de imágenes del mismo tamaño.
-Propagar estilo
+1. En Blender ve a `Edit > Preferences > Add-ons > Install...` y elige `lineart_to_moho.py`.
+2. Activa el add-on **Line Art to Moho**.
+3. En la vista 3D abre la barra lateral (tecla `N`) y busca la pestaña **Moho**.
 
-Modificas los vectores de un fotograma (la referencia) y el script detecta qué propiedades cambiaste y las copia a todos los trazos de los demás dibujos de la capa Switch seleccionada, dentro del rango que elijas. No importa que cada fotograma tenga distinta cantidad de trazos o vértices.
+### El script de Moho
 
-Propiedades que propaga: pincel, parámetros del pincel, grosor, color y extremos de línea.
-Para que detecte bien el cambio, selecciona todos los trazos del fotograma de referencia al modificarlos. Si cambias solo algunos, los demás cuentan como "sin cambio".
-Casillas: tomar el estilo de la ventana Style en vez del dibujo de referencia, y copiar todo lo marcado aunque no detecte diferencias.
-No propaga la forma ni el ancho variable de cada punto, porque dependen de los vértices, que cambian entre fotogramas.
-Formato .lineart
+1. Copia `grease_pencil_tool.lua` y sus iconos (`grease_pencil_tool.png` y `grease_pencil_tool@2x.png`) a la carpeta de scripts de Moho. Deben ir juntos y con el mismo nombre base.
+2. Recarga los scripts o reinicia Moho.
 
-Un solo archivo con índice, para que Moho salte directo a los fotogramas que necesita sin leer todo:
+## Paso a paso
 
-Línea 1: cabecera fija de 81 bytes: LINEARTMOHO 2 index_offset=NNNNNNNNNN index_length=NNNNNNNNNN.
-Una línea JSON por fotograma: {"frame": N, "strokes": [...]}. Cada trazo trae capa, cerrado, material, grosor y puntos ([x, y, presión] normalizados al encuadre de la cámara).
-Última línea: el índice (JSON) con fps, resolución, cámara, objeto y, por fotograma, su posición (offset) y tamaño (length) en bytes.
+### 1. Exportar desde Blender
 
-La profundidad (eje Z de la cámara) se descarta: los trazos de Moho son 2D.
+En la pestaña **Moho** de la barra lateral, con tu objeto Grease Pencil seleccionado:
 
-Estado del proyecto
-Auto Lineart (un fotograma y rangos, incluso con objetos en movimiento o deformados): probado, funciona.
-Exportar desde Blender e importar en Moho, tanto un fotograma como varios fotogramas: probado, funciona.
-Propagar estilo (global): probado, funciona.
-Pendiente de desarrollar: propagación por proximidad (cada trazo toma el estilo del trazo más cercano del fotograma anterior).
-Limitaciones conocidas
-Rendimiento: un fotograma importado puede tener cientos de trazos, cada uno con su pincel. La primera pasada de reproducción en Moho puede ser lenta, porque Moho dibuja los pinceles uno por uno y no guarda ese cache en el proyecto. Si pasa, prueba con un pincel simple o limitando los trazos por fotograma.
-Cambio de pincel por script: Moho guarda el pincel correctamente, pero no siempre redibuja su imagen en pantalla al instante. Si no lo ves, elige el pincel en la ventana Style antes de importar, o guarda y reabre el proyecto.
-Selector de archivos: abrirlo después de cerrar un panel propio cerraba Moho. Por eso el botón de importar lo abre dentro del panel principal.
-Trazos en 2D: al proyectar con la cámara, se pierde la profundidad; si la cámara está animada, cada fotograma usa la posición de cámara de ese fotograma.
-Autor y licencia
+1. Pulsa **Hornear Line Art**.
+2. Elige los fotogramas que quieres: **Usar el rango de la escena**, o escribe **Inicio** y **Fin** (puede ser un solo fotograma).
+3. Si quieres, activa **Solo fotogramas horneados** (omite los que no tengan dibujo en vez de repetir el último) o **Incluir capas ocultas**.
+4. Pulsa **Exportar a Moho** y elige dónde guardar el archivo `.lineart`.
 
-Creado por AngelicMotión. El proyecto es gratuito y libre: cualquiera puede usarlo.
+### 2. Usar las herramientas en Moho
 
-Estructura
-lineart_to_moho.py          Add-on de Blender 3.6 (exporta .lineart)
-grease_pencil_tool.lua      Script de Moho con las tres herramientas
-grease_pencil_tool.png      Icono 24x24
-grease_pencil_tool@2x.png   Icono 48x48
+Ejecuta **Grease Pencil Tool**. Verás un panel con tres botones: pulsa el de la herramienta que quieras (se marca su casilla) y luego **OK**. Se abre el panel de esa herramienta.
+
+#### Importar Line Art de Blender
+
+Al pulsar su botón se abre el selector de archivos para que elijas tu `.lineart`. Después puedes ajustar:
+
+- Cuántos fotogramas importar (por si quieres probar con pocos primero) y un desfase de fotogramas.
+- **Suavizado** y **simplificación de puntos**, para tener menos vértices y líneas más limpias.
+- **Grosor** en píxeles (si lo dejas en 0 usa el de la ventana Style).
+- Un límite de trazos por fotograma, útil para pruebas.
+- Opciones extra: usar la presión de Blender como grosor (experimental) y dibujar un marco de alineación para comprobar la escala.
+
+El **pincel, el color y el grosor** se toman de la ventana **Style** de Moho: elígelos antes de importar y el liner ya sale con tu estilo.
+
+#### Auto Lineart
+
+Selecciona la capa que quieres contornear y ejecuta la herramienta.
+
+- Con un fotograma crea una capa vectorial.
+- Con un rango crea una capa **Switch** con un dibujo vectorial por fotograma.
+- Puedes ajustar suavizado, simplificación, tamaño mínimo de los contornos y grosor.
+- También usa el pincel, el color y el grosor de la ventana **Style**.
+
+#### Propagar estilo
+
+1. Cambia el pincel, el grosor o el color de los trazos de **un** fotograma (el de referencia). Selecciona **todos** sus trazos al hacerlo.
+2. Selecciona la capa Switch y ejecuta la herramienta.
+3. Elige el fotograma de referencia y el rango al que aplicar los cambios.
+
+La herramienta detecta qué cambiaste y lo copia a todos los trazos de los demás fotogramas del rango. No importa que cada fotograma tenga distinta cantidad de trazos. Al terminar te muestra un resumen de lo que propagó.
+
+Propaga: pincel, parámetros del pincel, grosor, color y extremos de línea. La forma de los trazos no se toca.
+
+## Cosas que conviene saber
+
+- **La primera reproducción puede ir lenta.** Un fotograma importado puede tener cientos de trazos con pincel, y Moho los dibuja uno por uno la primera vez. Si te pasa, prueba con un pincel más simple o limita los trazos por fotograma.
+- **Si cambias el pincel y no lo ves enseguida,** es cosa de Moho: el cambio sí se guarda, pero a veces no redibuja al momento. Elige el pincel en la ventana Style **antes** de importar, o guarda y vuelve a abrir el proyecto.
+- **Todo es 2D.** Los trazos se proyectan con la cámara de Blender y se pierde la profundidad. Si la cámara está animada, cada fotograma usa la posición de cámara de ese momento.
+
+## Qué viene después
+
+- Propagación por proximidad: que cada trazo tome el estilo del trazo más cercano del fotograma anterior.
+
+## Para curiosos: el archivo `.lineart`
+
+Es un único archivo con un índice al final, así Moho salta directo a los fotogramas que necesita sin leerlo todo:
+
+- Una cabecera fija de 81 bytes: `LINEARTMOHO 2 index_offset=NNNNNNNNNN index_length=NNNNNNNNNN`.
+- Una línea de texto JSON por fotograma, con sus trazos. Cada punto es `[x, y, presión]`, normalizado al encuadre de la cámara.
+- Al final, el índice, con los fps, la resolución, la cámara y la posición de cada fotograma dentro del archivo.
+
+## Autor y licencia
+
+Creado por **AngelicMotión**. El proyecto es gratuito y libre: cualquiera puede usarlo.
