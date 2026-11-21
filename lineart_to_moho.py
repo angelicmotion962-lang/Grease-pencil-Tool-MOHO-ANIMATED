@@ -12,20 +12,30 @@ Formato (todo en bytes, UTF-8):
   ultima  : el indice (JSON) con fps, camara y, por fotograma, offset y length en bytes
 
 Solo usa la API de Blender 3.6 (GPencil antiguo):
-  GPencilLayer.frames / .hide / .info
+  GPencilLayer.frames / .hide / .info / .location / .rotation / .scale
   GPencilFrame.frame_number / .strokes
   GPencilStroke.points / .use_cyclic / .material_index / .line_width
   GPencilStrokePoint.co / .pressure
-  bpy_extras.object_utils.world_to_camera_view
+  Camera.view_frame / bpy_extras.object_utils.world_to_camera_view
+  WindowManager.progress_begin / progress_update / progress_end
+
+Cambios de la v0.3.0 respecto a la 0.2.0:
+  - La proyeccion a la camara se precalcula una vez por fotograma (antes se recalculaba
+    punto por punto). Se verifica contra world_to_camera_view y, si no coincide, se usa esa.
+  - Se aplica la transformacion propia de la capa de Grease Pencil (location/rotation/scale).
+  - Los fotogramas sin clave horneada ya no se evaluan (antes se avanzaba la escena igual).
+  - Barra de progreso en Blender mientras exporta.
+  - El archivo se escribe a un temporal y se renombra al terminar: nunca queda un .lineart a medias.
+  - Avisa antes de sobrescribir un archivo existente y comprueba que la camara sea una camara.
 """
 
 bl_info = {
     "name": "Line Art to Moho",
-    "author": "Claude",
-    "version": (0, 2, 0),
+    "author": "AngelicMotion",
+    "version": (0, 3, 0),
     "blender": (3, 6, 0),
     "location": "Vista 3D > Barra lateral (N) > pestana Moho",
-    "description": "Exporta los trazos horneados de Line Art a JSON por fotograma para Moho",
+    "description": "Exporta los trazos horneados de Line Art a un archivo .lineart para Moho",
     "category": "Import-Export",
 }
 
@@ -35,8 +45,11 @@ import os
 import bpy
 from bpy.props import BoolProperty, IntProperty, PointerProperty, StringProperty
 from bpy_extras.object_utils import world_to_camera_view
+from mathutils import Matrix
 
 FORMAT_VERSION = 2
+HEADER_LEN = 80
+PROJECTION_TOLERANCE = 1e-6
 
 
 # ----------------------------------------------------------------------
@@ -61,6 +74,66 @@ def find_key(layer, frame_number, exact_only):
     return best
 
 
+def frame_has_key(gp_obj, frame_number, exact_only=True, include_hidden=False):
+    """True si alguna capa (visible, salvo que se pidan las ocultas) tiene dibujo en ese fotograma.
+
+    Es barato: no mueve la escena. Sirve para no evaluar fotogramas que se van a omitir.
+    """
+    for layer in gp_obj.data.layers:
+        if layer.hide and not include_hidden:
+            continue
+        if find_key(layer, frame_number, exact_only) is not None:
+            return True
+    return False
+
+
+def layer_matrix(layer):
+    """Matriz de la transformacion propia de la capa (location/rotation/scale), o None si es la identidad.
+
+    Los puntos de un trazo no incluyen esa transformacion: Blender la aplica al dibujar.
+    (No se tiene en cuenta un 'parent' de capa; es poco comun en Line Art.)
+    """
+    try:
+        loc, rot, sca = layer.location, layer.rotation, layer.scale
+        moved = loc.length > 1e-9
+        rotated = any(abs(r) > 1e-9 for r in rot)
+        scaled = any(abs(s - 1.0) > 1e-9 for s in sca)
+        if moved or rotated or scaled:
+            return Matrix.LocRotScale(loc, rot, sca)
+    except Exception:
+        pass
+    return None
+
+
+def make_projector(scene, camera):
+    """Devuelve f(coordenada_mundo) -> (x, y, profundidad), igual que world_to_camera_view.
+
+    world_to_camera_view recalcula la camara en cada llamada; aqui se hace una sola vez por
+    fotograma. Es la misma formula que usa bpy_extras (con el mismo resultado).
+    """
+    cam_inv = camera.matrix_world.normalized().inverted()
+    cdata = camera.data
+    ortho = (cdata.type == 'ORTHO')
+    base = [v.copy() for v in cdata.view_frame(scene=scene)[:3]]
+    vz = base[0].z
+    min_x0, max_x0 = base[2].x, base[1].x
+    min_y0, max_y0 = base[1].y, base[0].y
+
+    def project(co):
+        c = cam_inv @ co
+        z = -c.z
+        if ortho:
+            min_x, max_x, min_y, max_y = min_x0, max_x0, min_y0, max_y0
+        else:
+            if z == 0.0:
+                return 0.5, 0.5, 0.0
+            k = -z / vz
+            min_x, max_x, min_y, max_y = min_x0 * k, max_x0 * k, min_y0 * k, max_y0 * k
+        return (c.x - min_x) / (max_x - min_x), (c.y - min_y) / (max_y - min_y), z
+
+    return project
+
+
 def collect_frame(scene, camera, gp_obj, frame_number, exact_only=True, include_hidden=False):
     """Lee los trazos de todas las capas en un fotograma.
 
@@ -69,6 +142,8 @@ def collect_frame(scene, camera, gp_obj, frame_number, exact_only=True, include_
     (0,0 = abajo-izquierda, 1,1 = arriba-derecha).
     """
     mw = gp_obj.matrix_world          # co esta en espacio local del objeto
+    project = make_projector(scene, camera)
+    checked = False                   # se compara una vez con world_to_camera_view
     has_key = False
     strokes_out = []
     for layer in gp_obj.data.layers:
@@ -78,13 +153,24 @@ def collect_frame(scene, camera, gp_obj, frame_number, exact_only=True, include_
         if fr is None:
             continue
         has_key = True
+        lm = layer_matrix(layer)
+        m = mw if lm is None else mw @ lm
         for st in fr.strokes:
             if len(st.points) < 2:
                 continue
             pts = []
             for p in st.points:
-                ndc = world_to_camera_view(scene, camera, mw @ p.co)
-                pts.append([round(ndc.x, 5), round(ndc.y, 5), round(p.pressure, 4)])
+                world = m @ p.co
+                if not checked:
+                    ref = world_to_camera_view(scene, camera, world)
+                    mine = project(world)
+                    if (abs(ref.x - mine[0]) > PROJECTION_TOLERANCE or
+                            abs(ref.y - mine[1]) > PROJECTION_TOLERANCE):
+                        # no deberia pasar; si pasa, se usa la funcion oficial en todo el fotograma
+                        project = lambda co: tuple(world_to_camera_view(scene, camera, co))
+                    checked = True
+                x, y, _z = project(world)
+                pts.append([round(x, 5), round(y, 5), round(p.pressure, 4)])
             strokes_out.append({
                 "capa": layer.info,
                 "cerrado": bool(st.use_cyclic),
@@ -95,28 +181,37 @@ def collect_frame(scene, camera, gp_obj, frame_number, exact_only=True, include_
     return has_key, strokes_out
 
 
-HEADER_LEN = 80
-
-
 def _header(index_offset, index_length):
     text = "LINEARTMOHO 2 index_offset=%010d index_length=%010d" % (index_offset, index_length)
     return text.ljust(HEADER_LEN).encode("ascii") + b"\n"          # 81 bytes en total
 
 
-def export_range(scene, camera, gp_obj, filepath, start, end, exact_only=True, include_hidden=False):
-    """Exporta start..end (incluidos) a UN archivo con indice. Devuelve un resumen (dict)."""
+def export_range(scene, camera, gp_obj, filepath, start, end,
+                 exact_only=True, include_hidden=False, progress=None):
+    """Exporta start..end (incluidos) a UN archivo con indice. Devuelve un resumen (dict).
+
+    progress: funcion opcional progress(numero_de_fotograma_actual) para mostrar avance.
+    El archivo se escribe primero a un temporal y solo se renombra si todo salio bien.
+    """
     if end < start:
         raise ValueError("El fotograma final no puede ser menor que el inicial.")
     folder = os.path.dirname(filepath)
     if folder:
         os.makedirs(folder, exist_ok=True)
+    tmp_path = filepath + ".tmp"
     original_frame = scene.frame_current
     frames_info, skipped = [], []
     total_strokes = 0
+    done = False
     try:
-        with open(filepath, "wb") as fh:
+        with open(tmp_path, "wb") as fh:
             fh.write(_header(0, 0))                    # se reescribe al final con el indice real
             for f in range(start, end + 1):
+                if progress is not None:
+                    progress(f)
+                if not frame_has_key(gp_obj, f, exact_only, include_hidden):
+                    skipped.append(f)                  # sin dibujo: no hace falta mover la escena
+                    continue
                 scene.frame_set(f)                     # la camara y el objeto pueden estar animados
                 has_key, strokes = collect_frame(scene, camera, gp_obj, f, exact_only, include_hidden)
                 if not has_key:
@@ -147,8 +242,15 @@ def export_range(scene, camera, gp_obj, filepath, start, end, exact_only=True, i
             fh.write(b"\n")
             fh.seek(0)
             fh.write(_header(idx_offset, len(idx_data)))
+        os.replace(tmp_path, filepath)                 # solo ahora aparece el archivo definitivo
+        done = True
     finally:
         scene.frame_set(original_frame)
+        if not done and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
     return {"exported": len(frames_info), "skipped": skipped, "strokes": total_strokes}
 
 
@@ -202,6 +304,7 @@ class LINEARTMOHO_OT_export(bpy.types.Operator):
 
     filepath: StringProperty(subtype='FILE_PATH')
     filter_glob: StringProperty(default="*.lineart", options={'HIDDEN'})
+    check_existing: BoolProperty(default=True, options={'HIDDEN'})   # avisa si el archivo ya existe
 
     @classmethod
     def poll(cls, context):
@@ -219,8 +322,8 @@ class LINEARTMOHO_OT_export(bpy.types.Operator):
         s = scene.lineart_moho
         gp_obj = context.active_object
         camera = scene.camera
-        if camera is None:
-            self.report({'ERROR'}, "La escena no tiene camara activa.")
+        if camera is None or camera.type != 'CAMERA':
+            self.report({'ERROR'}, "La escena no tiene una camara activa.")
             return {'CANCELLED'}
         if not self.filepath:
             self.report({'ERROR'}, "No elegiste donde guardar el archivo.")
@@ -230,17 +333,29 @@ class LINEARTMOHO_OT_export(bpy.types.Operator):
             path += ".lineart"
         start = scene.frame_start if s.use_scene_range else s.frame_start
         end = scene.frame_end if s.use_scene_range else s.frame_end
+        if end < start:
+            self.report({'ERROR'}, "El fotograma final (%d) es menor que el inicial (%d)." % (end, start))
+            return {'CANCELLED'}
+
+        wm = context.window_manager
+        wm.progress_begin(start, end + 1)
         try:
-            res = export_range(scene, camera, gp_obj, path,
-                               start, end, s.exact_only, s.include_hidden)
+            res = export_range(scene, camera, gp_obj, path, start, end,
+                               s.exact_only, s.include_hidden,
+                               progress=lambda f: wm.progress_update(f))
         except Exception as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
+        finally:
+            wm.progress_end()
+
         msg = "Exportados %d fotogramas (%d trazos) a %s" % (
             res["exported"], res["strokes"], path)
         if res["skipped"]:
             msg += " | sin clave horneada: %d fotogramas (ej. %d)" % (len(res["skipped"]), res["skipped"][0])
         self.report({'INFO'}, msg)
+        if res["exported"] == 0:
+            self.report({'WARNING'}, "No se exporto ningun fotograma: hornea el Line Art en ese rango primero.")
         return {'FINISHED'}
 
 
@@ -253,7 +368,8 @@ class LINEARTMOHO_PT_panel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        s = context.scene.lineart_moho
+        scene = context.scene
+        s = scene.lineart_moho
         layout.operator("lineart_moho.bake", icon='MOD_LINEART')
         layout.separator()
         layout.prop(s, "use_scene_range")
@@ -261,8 +377,15 @@ class LINEARTMOHO_PT_panel(bpy.types.Panel):
         col.enabled = not s.use_scene_range
         col.prop(s, "frame_start")
         col.prop(s, "frame_end")
+        if not s.use_scene_range and s.frame_end < s.frame_start:
+            layout.label(text="El fin es menor que el inicio", icon='ERROR')
         layout.prop(s, "exact_only")
         layout.prop(s, "include_hidden")
+        cam = scene.camera
+        if cam is None:
+            layout.label(text="La escena no tiene camara activa", icon='ERROR')
+        else:
+            layout.label(text="Camara: %s" % cam.name, icon='CAMERA_DATA')
         layout.operator("lineart_moho.export", icon='EXPORT')
 
 
